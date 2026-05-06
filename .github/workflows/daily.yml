@@ -31,5 +31,5 @@ jobs:
           TOP_N: "10"
           DAYS: "7"
           LANGUAGE: ""
-          ENABLE_AI_SUMMARY: "true"
+          ENABLE_AI_SUMMARY: "false"
         run: python main.py
