@@ -1,11 +1,12 @@
 import os
 import sys
 import json
+import time
 import hmac
-import base64
 import hashlib
+import base64
+import urllib.parse
 import requests
-from urllib.parse import quote_plus
 from datetime import datetime, timedelta, timezone
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
@@ -93,7 +94,7 @@ def fallback_chinese_summary(repos, since_date, days, language=""):
         "观察：",
         "- 最近热门项目通常集中在 AI、开发工具、自动化、安全等方向。",
         f"- 当前已按 {language} 语言过滤。" if language else "- 当前未限制编程语言。",
-        "- 当前为规则摘要模式，未配置 AI 也可稳定使用。",
+        "- 已启用兜底摘要模式；若配置 AI，可输出更自然的中文总结。",
     ])
     return "\n".join(lines)
 
@@ -171,31 +172,30 @@ def generate_ai_summary(repos, since_date, days, language=""):
     return text
 
 
+def _dingtalk_signed_url(webhook, secret):
+    """Append timestamp and HMAC-SHA256 signature to the webhook URL."""
+    timestamp = str(round(time.time() * 1000))
+    string_to_sign = f"{timestamp}\n{secret}"
+    sign = base64.b64encode(
+        hmac.new(secret.encode("utf-8"), string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    ).decode("utf-8")
+    return f"{webhook}&timestamp={timestamp}&sign={urllib.parse.quote_plus(sign)}"
+
+
 def build_dingtalk_payload(text, title="GitHub 每日热门项目"):
+    """Build a DingTalk markdown message payload."""
     return {
         "msgtype": "markdown",
         "markdown": {
             "title": title,
-            "text": f"### {title}\n\n{text}",
+            "text": text,
         },
     }
 
 
-def sign_dingtalk_webhook(webhook, secret):
-    if not secret:
-        return webhook
-    timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
-    string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
-    digest = hmac.new(secret.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
-    sign = quote_plus(base64.b64encode(digest))
-    separator = "&" if "?" in webhook else "?"
-    return f"{webhook}{separator}timestamp={timestamp}&sign={sign}"
-
-
 def send_to_dingtalk(webhook, payload, secret=""):
-    webhook_url = sign_dingtalk_webhook(webhook, secret)
-    headers = {"Content-Type": "application/json"}
-    resp = requests.post(webhook_url, headers=headers, json=payload, timeout=30)
+    url = _dingtalk_signed_url(webhook, secret) if secret else webhook
+    resp = requests.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     result = resp.json()
     if result.get("errcode", -1) != 0:
@@ -223,7 +223,7 @@ def main():
         title += f"（{LANGUAGE}）"
 
     payload = build_dingtalk_payload(text, title=title)
-    send_to_dingtalk(DINGTALK_WEBHOOK, payload, DINGTALK_SECRET)
+    send_to_dingtalk(DINGTALK_WEBHOOK, payload, secret=DINGTALK_SECRET)
     print(f"Push sent successfully. Query={query}")
 
 

@@ -1,13 +1,14 @@
 # GitHub Hot Daily
 
-每天定时抓取 GitHub 热门项目，并通过钉钉机器人推送中文摘要。
+每天定时抓取 GitHub 热门项目，并通过**钉钉机器人**推送中文摘要。
 
 ## 功能
 
 - 使用 GitHub Search API 获取近期热门仓库
-- 支持钉钉机器人推送
-- 支持 AI 中文摘要
-- AI 失败时自动回退到默认中文摘要
+- 支持钉钉自定义机器人推送（Markdown 消息）
+- 支持钉钉加签安全校验（HMAC-SHA256）
+- 支持 AI 中文摘要（可选）
+- AI 失败时自动回退到规则式中文摘要
 - 支持 GitHub Actions 定时执行
 - 支持手动触发工作流
 
@@ -16,6 +17,7 @@
 ```text
 .
 ├── main.py
+├── requirements.txt
 └── .github/
     └── workflows/
         └── daily.yml
@@ -35,21 +37,24 @@
 ### 必填
 
 #### `DINGTALK_WEBHOOK`
-钉钉群自定义机器人的 Webhook 地址。
+钉钉自定义机器人的 Webhook 地址。
 
 示例：
 
 ```text
-https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxxxxxxxxx
+https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 #### `GH_TOKEN`
 你自己的 GitHub Personal Access Token，用于调用 GitHub API，避免过低的 rate limit。
 
-### 可选（钉钉加签）
+### 可选（推荐配置，用于加签安全校验）
 
 #### `DINGTALK_SECRET`
-如果你在钉钉机器人安全设置中启用了“加签”，就需要配置该 secret。未开启加签时可不填。
+钉钉机器人开启"加签"后的密钥（以 `SEC` 开头）。
+
+如果你在创建机器人时选择了"加签"安全策略，把该密钥存入此 secret。  
+如果未开启加签，可以不填。
 
 ### 如果启用 AI 摘要，建议配置
 
@@ -59,18 +64,14 @@ https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxxxxxxxxx
 ### 可选
 
 #### `OPENAI_BASE_URL`
-如果你使用兼容 OpenAI API 的服务，可以自定义 Base URL。
-
-默认值通常可为：
+如果你使用兼容 OpenAI API 的服务，可以自定义 Base URL。默认值：
 
 ```text
 https://api.openai.com/v1
 ```
 
 #### `OPENAI_MODEL`
-指定使用的模型名称。
-
-例如：
+指定使用的模型名称。例如：
 
 ```text
 gpt-4.1-mini
@@ -78,25 +79,24 @@ gpt-4.1-mini
 
 ## 如何创建钉钉自定义机器人
 
-1. 新建或打开一个钉钉群
-2. 进入群设置
-3. 进入「智能群助手 / 机器人」
-4. 添加「自定义机器人」
-5. 复制 Webhook 地址，保存到 GitHub Secret：`DINGTALK_WEBHOOK`
-6. 如开启“加签”，同时复制签名密钥并保存到 `DINGTALK_SECRET`
+1. 打开钉钉，进入你想接收通知的群
+2. 点击右上角 **群设置** → **智能群助手**（或"机器人"）
+3. 点击 **添加机器人**
+4. 选择 **自定义**
+5. 给机器人起一个名字，例如：`GitHub Hot Daily`
+6. **安全设置**选择以下之一：
+   - **加签**（推荐）：复制"密钥"（以 `SEC` 开头），保存为 GitHub Secret `DINGTALK_SECRET`
+   - **自定义关键词**：填写 `GitHub`，确保推送内容包含该词即可（本项目消息标题固定包含 `GitHub`）
+   - **IP 地址段**：不推荐，GitHub Actions 出口 IP 不固定
+7. 创建成功后，复制 **Webhook 地址**，保存为 GitHub Secret `DINGTALK_WEBHOOK`
 
-> 建议先用不加签模式跑通；若启用加签，务必同时配置 `DINGTALK_SECRET`。
+> 加签方式安全性最高，且本项目已内置支持，推荐优先选择。
 
 ## 如何创建 GitHub Token
 
-1. 打开 GitHub
-2. 进入 `Settings`
-3. 进入 `Developer settings`
-4. 进入 `Personal access tokens`
-5. 创建一个新的 token
-6. 保存到仓库 Secret：`GH_TOKEN`
-
-如果只是读取公开仓库，通常不需要太高权限。
+1. 打开 GitHub → `Settings` → `Developer settings` → `Personal access tokens`
+2. 创建一个新的 Classic Token（公开仓库不需要特殊权限）
+3. 保存到仓库 Secret：`GH_TOKEN`
 
 ## 如何手动运行
 
@@ -130,27 +130,27 @@ LANGUAGE: "Python"
 DAYS: "7"
 ```
 
-关闭 AI 摘要：
+关闭 AI 摘要（不需要 OPENAI_API_KEY）：
 
 ```yaml
 ENABLE_AI_SUMMARY: "false"
 ```
 
-## GitHub Actions Secrets 清单
+## 推荐配置
 
-最小可用：
+如果你想让结果更稳定，建议：
 
-- `GH_TOKEN`
-- `DINGTALK_WEBHOOK`
-
-可选：
-
-- `DINGTALK_SECRET`（启用钉钉加签时必填）
-- `OPENAI_API_KEY`（启用 AI 摘要时必填）
-- `OPENAI_BASE_URL`
-- `OPENAI_MODEL`
+- `DAYS: "7"`
+- `TOP_N: "10"`
+- `ENABLE_AI_SUMMARY: "false"`（先跑通，之后再考虑加 AI）
 
 ## 说明
 
-- 项目继续使用 GitHub Search API 拉取数据逻辑。
-- 即使不配置 AI，依然会走规则式中文摘要，适合直接在国内网络环境稳定使用。
+这个项目通过 GitHub Search API 获取热门项目，并生成中文摘要通过钉钉推送。
+
+后续可以继续升级：
+
+- 增加历史去重
+- 增加 star 增长对比
+- 支持多语言分类推送
+- 支持更丰富的钉钉卡片样式
