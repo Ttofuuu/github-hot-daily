@@ -1,11 +1,16 @@
 import os
 import sys
 import json
+import hmac
+import base64
+import hashlib
 import requests
+from urllib.parse import quote_plus
 from datetime import datetime, timedelta, timezone
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "")
+DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "")
 TOP_N = int(os.getenv("TOP_N", "10"))
 LANGUAGE = os.getenv("LANGUAGE", "").strip()
 DAYS = int(os.getenv("DAYS", "1"))
@@ -88,7 +93,7 @@ def fallback_chinese_summary(repos, since_date, days, language=""):
         "观察：",
         "- 最近热门项目通常集中在 AI、开发工具、自动化、安全等方向。",
         f"- 当前已按 {language} 语言过滤。" if language else "- 当前未限制编程语言。",
-        "- 已启用兜底摘要模式；若配置 AI，可输出更自然的中文总结。",
+        "- 当前为规则摘要模式，未配置 AI 也可稳定使用。",
     ])
     return "\n".join(lines)
 
@@ -125,7 +130,7 @@ def generate_ai_summary(repos, since_date, days, language=""):
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "你是一个技术资讯编辑，负责把 GitHub 热门仓库整理成适合飞书推送的中文日报。"
+                        "text": "你是一个技术资讯编辑，负责把 GitHub 热门仓库整理成适合钉钉推送的中文日报。"
                     }
                 ]
             },
@@ -166,46 +171,41 @@ def generate_ai_summary(repos, since_date, days, language=""):
     return text
 
 
-def build_card_payload(text, title="GitHub 每日热门项目"):
+def build_dingtalk_payload(text, title="GitHub 每日热门项目"):
     return {
-        "msg_type": "interactive",
-        "card": {
-            "config": {
-                "wide_screen_mode": True,
-                "enable_forward": True,
-            },
-            "header": {
-                "template": "blue",
-                "title": {
-                    "tag": "plain_text",
-                    "content": title,
-                },
-            },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": text.replace("\n", "\n")
-                    }
-                }
-            ]
-        }
+        "msgtype": "markdown",
+        "markdown": {
+            "title": title,
+            "text": f"### {title}\n\n{text}",
+        },
     }
 
 
-def send_to_feishu(webhook, payload):
-    resp = requests.post(webhook, json=payload, timeout=30)
+def sign_dingtalk_webhook(webhook, secret):
+    if not secret:
+        return webhook
+    timestamp = str(int(datetime.now(timezone.utc).timestamp() * 1000))
+    string_to_sign = f"{timestamp}\n{secret}".encode("utf-8")
+    digest = hmac.new(secret.encode("utf-8"), string_to_sign, hashlib.sha256).digest()
+    sign = quote_plus(base64.b64encode(digest))
+    separator = "&" if "?" in webhook else "?"
+    return f"{webhook}{separator}timestamp={timestamp}&sign={sign}"
+
+
+def send_to_dingtalk(webhook, payload, secret=""):
+    webhook_url = sign_dingtalk_webhook(webhook, secret)
+    headers = {"Content-Type": "application/json"}
+    resp = requests.post(webhook_url, headers=headers, json=payload, timeout=30)
     resp.raise_for_status()
     result = resp.json()
-    if result.get("code", -1) != 0:
-        raise RuntimeError(f"Feishu webhook error: {result}")
+    if result.get("errcode", -1) != 0:
+        raise RuntimeError(f"DingTalk webhook error: {result}")
     return result
 
 
 def main():
-    if not FEISHU_WEBHOOK:
-        raise RuntimeError("Missing FEISHU_WEBHOOK environment variable")
+    if not DINGTALK_WEBHOOK:
+        raise RuntimeError("Missing DINGTALK_WEBHOOK environment variable")
 
     repos, since_date, query = fetch_trending_repos(days=DAYS, top_n=TOP_N, language=LANGUAGE)
 
@@ -222,8 +222,8 @@ def main():
     if LANGUAGE:
         title += f"（{LANGUAGE}）"
 
-    payload = build_card_payload(text, title=title)
-    send_to_feishu(FEISHU_WEBHOOK, payload)
+    payload = build_dingtalk_payload(text, title=title)
+    send_to_dingtalk(DINGTALK_WEBHOOK, payload, DINGTALK_SECRET)
     print(f"Push sent successfully. Query={query}")
 
 
