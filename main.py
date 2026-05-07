@@ -1,11 +1,17 @@
 import os
 import sys
 import json
+import time
+import hmac
+import hashlib
+import base64
+import urllib.parse
 import requests
 from datetime import datetime, timedelta, timezone
 
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
+DINGTALK_WEBHOOK = os.getenv("DINGTALK_WEBHOOK", "")
+DINGTALK_SECRET = os.getenv("DINGTALK_SECRET", "")
 TOP_N = int(os.getenv("TOP_N", "10"))
 LANGUAGE = os.getenv("LANGUAGE", "").strip()
 DAYS = int(os.getenv("DAYS", "1"))
@@ -125,7 +131,7 @@ def generate_ai_summary(repos, since_date, days, language=""):
                 "content": [
                     {
                         "type": "input_text",
-                        "text": "你是一个技术资讯编辑，负责把 GitHub 热门仓库整理成适合飞书推送的中文日报。"
+                        "text": "你是一个技术资讯编辑，负责把 GitHub 热门仓库整理成适合钉钉推送的中文日报。"
                     }
                 ]
             },
@@ -166,46 +172,40 @@ def generate_ai_summary(repos, since_date, days, language=""):
     return text
 
 
-def build_card_payload(text, title="GitHub 每日热门项目"):
+def _dingtalk_signed_url(webhook, secret):
+    """Append timestamp and HMAC-SHA256 signature to the webhook URL."""
+    timestamp = str(round(time.time() * 1000))
+    string_to_sign = f"{timestamp}\n{secret}"
+    sign = base64.b64encode(
+        hmac.new(secret.encode("utf-8"), string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
+    ).decode("utf-8")
+    return f"{webhook}&timestamp={timestamp}&sign={urllib.parse.quote_plus(sign)}"
+
+
+def build_dingtalk_payload(text, title="GitHub 每日热门项目"):
+    """Build a DingTalk markdown message payload."""
     return {
-        "msg_type": "interactive",
-        "card": {
-            "config": {
-                "wide_screen_mode": True,
-                "enable_forward": True,
-            },
-            "header": {
-                "template": "blue",
-                "title": {
-                    "tag": "plain_text",
-                    "content": title,
-                },
-            },
-            "elements": [
-                {
-                    "tag": "div",
-                    "text": {
-                        "tag": "lark_md",
-                        "content": text.replace("\n", "\n")
-                    }
-                }
-            ]
-        }
+        "msgtype": "markdown",
+        "markdown": {
+            "title": title,
+            "text": text,
+        },
     }
 
 
-def send_to_feishu(webhook, payload):
-    resp = requests.post(webhook, json=payload, timeout=30)
+def send_to_dingtalk(webhook, payload, secret=""):
+    url = _dingtalk_signed_url(webhook, secret) if secret else webhook
+    resp = requests.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     result = resp.json()
-    if result.get("code", -1) != 0:
-        raise RuntimeError(f"Feishu webhook error: {result}")
+    if result.get("errcode", -1) != 0:
+        raise RuntimeError(f"DingTalk webhook error: {result}")
     return result
 
 
 def main():
-    if not FEISHU_WEBHOOK:
-        raise RuntimeError("Missing FEISHU_WEBHOOK environment variable")
+    if not DINGTALK_WEBHOOK:
+        raise RuntimeError("Missing DINGTALK_WEBHOOK environment variable")
 
     repos, since_date, query = fetch_trending_repos(days=DAYS, top_n=TOP_N, language=LANGUAGE)
 
@@ -222,8 +222,8 @@ def main():
     if LANGUAGE:
         title += f"（{LANGUAGE}）"
 
-    payload = build_card_payload(text, title=title)
-    send_to_feishu(FEISHU_WEBHOOK, payload)
+    payload = build_dingtalk_payload(text, title=title)
+    send_to_dingtalk(DINGTALK_WEBHOOK, payload, secret=DINGTALK_SECRET)
     print(f"Push sent successfully. Query={query}")
 
 
