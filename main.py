@@ -94,7 +94,7 @@ def fallback_chinese_summary(repos, since_date, days, language=""):
         "观察：",
         "- 最近热门项目通常集中在 AI、开发工具、自动化、安全等方向。",
         f"- 当前已按 {language} 语言过滤。" if language else "- 当前未限制编程语言。",
-        "- 已启用兜底摘要模式；若配置 AI，可输出更自然的中文总结。",
+        "- 当前为规则式中文摘要；若配置 AI，可输出更自然的中文总结。",
     ])
     return "\n".join(lines)
 
@@ -174,12 +174,15 @@ def generate_ai_summary(repos, since_date, days, language=""):
 
 def _dingtalk_signed_url(webhook, secret):
     """Append timestamp and HMAC-SHA256 signature to the webhook URL."""
+    if not secret:
+        return webhook
     timestamp = str(round(time.time() * 1000))
     string_to_sign = f"{timestamp}\n{secret}"
     sign = base64.b64encode(
         hmac.new(secret.encode("utf-8"), string_to_sign.encode("utf-8"), digestmod=hashlib.sha256).digest()
     ).decode("utf-8")
-    return f"{webhook}&timestamp={timestamp}&sign={urllib.parse.quote_plus(sign)}"
+    separator = "&" if "?" in webhook else "?"
+    return f"{webhook}{separator}timestamp={timestamp}&sign={urllib.parse.quote_plus(sign)}"
 
 
 def build_dingtalk_payload(text, title="GitHub 每日热门项目"):
@@ -188,13 +191,13 @@ def build_dingtalk_payload(text, title="GitHub 每日热门项目"):
         "msgtype": "markdown",
         "markdown": {
             "title": title,
-            "text": text,
+            "text": f"### {title}\n\n{text}",
         },
     }
 
 
 def send_to_dingtalk(webhook, payload, secret=""):
-    url = _dingtalk_signed_url(webhook, secret) if secret else webhook
+    url = _dingtalk_signed_url(webhook, secret)
     resp = requests.post(url, json=payload, timeout=30)
     resp.raise_for_status()
     result = resp.json()
