@@ -1,14 +1,14 @@
 # GitHub Hot Daily
 
-每天定时抓取 GitHub 热门项目，并通过飞书机器人推送中文摘要。
+每天定时抓取 GitHub 热门项目，并通过**钉钉机器人**推送中文摘要。
 
 ## 功能
 
 - 使用 GitHub Search API 获取近期热门仓库
-- 支持飞书机器人推送
-- 支持飞书卡片消息
-- 支持 AI 中文摘要
-- AI 失败时自动回退到默认中文摘要
+- 支持钉钉自定义机器人推送（Markdown 消息）
+- 支持钉钉加签安全校验（HMAC-SHA256）
+- 支持 AI 中文摘要（可选）
+- AI 失败时自动回退到规则式中文摘要
 - 支持 GitHub Actions 定时执行
 - 支持手动触发工作流
 
@@ -36,17 +36,25 @@
 
 ### 必填
 
-#### `FEISHU_WEBHOOK`
-飞书群自定义机器人的 Webhook 地址。
+#### `DINGTALK_WEBHOOK`
+钉钉自定义机器人的 Webhook 地址。
 
 示例：
 
 ```text
-https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+https://oapi.dingtalk.com/robot/send?access_token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
-#### `GITHUB_TOKEN_CUSTOM`
+#### `GH_TOKEN`
 你自己的 GitHub Personal Access Token，用于调用 GitHub API，避免过低的 rate limit。
+
+### 可选（推荐配置，用于加签安全校验）
+
+#### `DINGTALK_SECRET`
+钉钉机器人开启"加签"后的密钥（以 `SEC` 开头）。
+
+如果你在创建机器人时选择了"加签"安全策略，把该密钥存入此 secret。  
+如果未开启加签，可以不填。
 
 ### 如果启用 AI 摘要，建议配置
 
@@ -56,44 +64,39 @@ https://open.feishu.cn/open-apis/bot/v2/hook/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxx
 ### 可选
 
 #### `OPENAI_BASE_URL`
-如果你使用兼容 OpenAI API 的服务，可以自定义 Base URL。
-
-默认值通常可为：
+如果你使用兼容 OpenAI API 的服务，可以自定义 Base URL。默认值：
 
 ```text
 https://api.openai.com/v1
 ```
 
 #### `OPENAI_MODEL`
-指定使用的模型名称。
-
-例如：
+指定使用的模型名称。例如：
 
 ```text
 gpt-4.1-mini
 ```
 
-## 如何获取飞书 Webhook
+## 如何创建钉钉自定义机器人
 
-1. 新建或打开一个飞书群
-2. 进入群设置
-3. 添加机器人
-4. 选择“自定义机器人”
-5. 创建后复制 Webhook 地址
-6. 把它保存到 GitHub Secret：`FEISHU_WEBHOOK`
+1. 打开钉钉，进入你想接收通知的群
+2. 点击右上角 **群设置** → **智能群助手**（或"机器人"）
+3. 点击 **添加机器人**
+4. 选择 **自定义**
+5. 给机器人起一个名字，例如：`GitHub Hot Daily`
+6. **安全设置**选择以下之一：
+   - **加签**（推荐）：复制"密钥"（以 `SEC` 开头），保存为 GitHub Secret `DINGTALK_SECRET`
+   - **自定义关键词**：填写 `GitHub`，确保推送内容包含该词即可（本项目消息标题固定包含 `GitHub`）
+   - **IP 地址段**：不推荐，GitHub Actions 出口 IP 不固定
+7. 创建成功后，复制 **Webhook 地址**，保存为 GitHub Secret `DINGTALK_WEBHOOK`
 
-> 建议先不要开启过于复杂的安全校验，等基础流程跑通后再加签名校验。
+> 加签方式安全性最高，且本项目已内置支持，推荐优先选择。
 
 ## 如何创建 GitHub Token
 
-1. 打开 GitHub
-2. 进入 `Settings`
-3. 进入 `Developer settings`
-4. 进入 `Personal access tokens`
-5. 创建一个新的 token
-6. 保存到仓库 Secret：`GITHUB_TOKEN_CUSTOM`
-
-如果只是读取公开仓库，通常不需要太高权限。
+1. 打开 GitHub → `Settings` → `Developer settings` → `Personal access tokens`
+2. 创建一个新的 Classic Token（公开仓库不需要特殊权限）
+3. 保存到仓库 Secret：`GH_TOKEN`
 
 ## 如何手动运行
 
@@ -102,14 +105,14 @@ gpt-4.1-mini
 3. 点击 `Run workflow`
 4. 选择 `main` 分支
 5. 运行后查看日志
-6. 成功后飞书群会收到推送
+6. 成功后钉钉群会收到推送
 
 ## 如何修改推送参数
 
 在 `.github/workflows/daily.yml` 里可以修改这些环境变量：
 
 - `TOP_N`：推送多少个项目，默认 `10`
-- `DAYS`：统计最近几天创建的项目，默认 `1`
+- `DAYS`：统计最近几天创建的项目，默认 `7`
 - `LANGUAGE`：按语言过滤，例如 `Python`、`TypeScript`、`Go`、`Rust`
 - `ENABLE_AI_SUMMARY`：是否启用 AI 摘要，`true` 或 `false`
 
@@ -127,7 +130,7 @@ LANGUAGE: "Python"
 DAYS: "7"
 ```
 
-关闭 AI 摘要：
+关闭 AI 摘要（不需要 OPENAI_API_KEY）：
 
 ```yaml
 ENABLE_AI_SUMMARY: "false"
@@ -139,24 +142,15 @@ ENABLE_AI_SUMMARY: "false"
 
 - `DAYS: "7"`
 - `TOP_N: "10"`
-- `ENABLE_AI_SUMMARY: "true"`
-
-## 仓库 Description
-
-请手动把仓库 Description 设置为：
-
-```text
-Daily GitHub hot projects pushed to Feishu with Chinese AI summaries.
-```
+- `ENABLE_AI_SUMMARY: "false"`（先跑通，之后再考虑加 AI）
 
 ## 说明
 
-这个项目当前通过 GitHub Search API 近似获取“热门项目”。
+这个项目通过 GitHub Search API 获取热门项目，并生成中文摘要通过钉钉推送。
 
-如果你之后想做得更像 GitHub Trending 页面，还可以继续升级为：
+后续可以继续升级：
 
-- 直接抓取 GitHub Trending 页面
 - 增加历史去重
 - 增加 star 增长对比
 - 支持多语言分类推送
-- 支持更漂亮的飞书卡片样式
+- 支持更丰富的钉钉卡片样式
